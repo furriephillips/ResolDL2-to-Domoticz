@@ -1,0 +1,60 @@
+#!/bin/zsh
+#
+## SolarHW-to-Domoticz
+
+SolarHW='<ResolDL2Host:Port>/dl2/live/data'
+DomoticzHost='<DomoticzHost:Port>'
+
+wget=`which wget`
+curl=`which curl`
+
+## Tweak IFS so that we separate on newline, not spaces
+## Record the old value
+OLDIFS="$IFS"
+## Tweak it
+IFS=$'\n'
+
+for stat in $(
+    $wget --no-check-certificate --secure-protocol=TLSv1 -q -O - $SolarHW \
+        | grep "<td>" \
+        | sed -e 's/^.*<td>//g' \
+            -e 's/&nbsp;//g' \
+            -e 's|</td>||g' \
+        | dos2unix \
+        | sed -e ':a;N;$!ba;s/:\n/,/g' \
+        | grep -v 'relay 2' \
+        | grep -v defective \
+        | grep -v temperature \
+        | grep -v operation \
+        | grep -v DL2 \
+        | grep -v Status \
+        | grep -v Programme \
+        | grep -v Version \
+        | sed -e 's/Temperature sensor 1/<DomoticzDummySensorIDX>,Solar Collector Temp (°C)/' \
+            -e 's/Temperature sensor 2/<DomoticzDummySensorIDX>,Hot-Water Tank Bottom Temp (°C)/' \
+            -e 's/Temperature sensor 3/<DomoticzDummySensorIDX>,Hot-Water Tank Top (°C)/' \
+            -e 's/Temperature sensor 4/<DomoticzDummySensorIDX>,Pump Station Return Temp (°C)/' \
+            -e 's/Pump speed relay 1/<DomoticzDummySensorIDX>,Pump Duty-Cycle (%)/' \
+            -e 's/Operating hours relay 1/<DomoticzDummySensorIDX>,Pump Duration (h)/' \
+            -e 's/Heat quantity/<DomoticzDummySensorIDX>,Heat Generation (kWh)/' \
+        | sed -e 's/  / /g' \
+            -e 's/,\(.*\) .*$/,\1/g'
+)
+do
+    echo -e "\e[1;4;35m"
+    printf '%s\n' "$stat"
+    IDX=`echo $stat | cut -f1 -d,`
+    STAT=`echo $stat | cut -f3 -d,`
+    echo -e -n "\e[1;4;33m"
+    echo $curl -s -X PUT "http://$DomoticzHost/json.htm?type=command&param=udevice&idx=$IDX&nvalue=0&svalue=$STAT"
+    echo -e -n "\e[0m"
+    $curl -s -X PUT "http://$DomoticzHost/json.htm?type=command&param=udevice&idx=$IDX&nvalue=0&svalue=$STAT"
+done
+echo ''
+
+## Return IFS to normal
+IFS="$OLDIFS"
+
+exit 0
+
+#EOF
