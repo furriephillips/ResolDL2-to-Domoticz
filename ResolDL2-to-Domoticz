@@ -1,59 +1,45 @@
 #!/bin/zsh
 #
-## SolarHW-to-Domoticz
+## ResolDL2-to-Domoticz
 
-SolarHW='<ResolDL2Host:Port>/dl2/live/data'
-DomoticzHost='<DomoticzHost:Port>'
+ResolDL2Host='YourResolDL2Host'
+DomoticzHost='YourDomoticzHost'
 
-wget=`which wget`
 curl=`which curl`
 
 ## Tweak IFS so that we separate on newline, not spaces
 ## Record the old value
-OLDIFS="$IFS"
+OLDIFS="${IFS}"
 ## Tweak it
 IFS=$'\n'
 
-for stat in $(
-    $wget --no-check-certificate --secure-protocol=TLSv1 -q -O - $SolarHW \
-        | grep "<td>" \
-        | sed -e 's/^.*<td>//g' \
-            -e 's/&nbsp;//g' \
-            -e 's|</td>||g' \
-        | dos2unix \
-        | sed -e ':a;N;$!ba;s/:\n/,/g' \
-        | grep -v 'relay 2' \
-        | grep -v defective \
-        | grep -v temperature \
-        | grep -v operation \
-        | grep -v DL2 \
-        | grep -v Status \
-        | grep -v Programme \
-        | grep -v Version \
-        | sed -e 's/Temperature sensor 1/<DomoticzDummySensorIDX>,Solar Collector Temp (°C)/' \
-            -e 's/Temperature sensor 2/<DomoticzDummySensorIDX>,Hot-Water Tank Bottom Temp (°C)/' \
-            -e 's/Temperature sensor 3/<DomoticzDummySensorIDX>,Hot-Water Tank Top (°C)/' \
-            -e 's/Temperature sensor 4/<DomoticzDummySensorIDX>,Pump Station Return Temp (°C)/' \
-            -e 's/Pump speed relay 1/<DomoticzDummySensorIDX>,Pump Duty-Cycle (%)/' \
-            -e 's/Operating hours relay 1/<DomoticzDummySensorIDX>,Pump Duration (h)/' \
-            -e 's/Heat quantity/<DomoticzDummySensorIDX>,Heat Generation (kWh)/' \
-        | sed -e 's/  / /g' \
-            -e 's/,\(.*\) .*$/,\1/g'
+for SolarHWStat in $(
+	${curl} -s "https://${ResolDL2Host}/dlx/download/download?source=current&outputType=text-csv-lf&filter=00" \
+		| tail -n 2 \
+		| cut -f1-8 -d';' \
+		| sed -e ':a' -e 'N' -e '$!ba' -e 's/\n/;/g' \
+		| awk -F';' '{printf "\n"$2","$10"\n"$3","$11"\n"$4","$12"\n"$5","$13"\n"$6","$14"\n"$7","$15"\n"$8","$16"\n"}' \
+		| sed -e 's/Solar Collector/IDX#,Solar Collector (°C)/' \
+			-e 's/Hot-Water-Tank Bottom/IDX#,Hot-Water-Tank Bottom (°C)/' \
+			-e 's/Hot-Water-Tank Top/IDX#,Hot-Water-Tank Top (°C)/' \
+			-e 's/Pump-Station Return/IDX#,Pump-Station Return (°C)/' \
+			-e 's/Pump Duty-Cycle/IDX#,Pump Duty-Cycle (%)/' \
+			-e 's/Total Pumping Hours/IDX#,Total Pumping Hours/' \
+			-e 's/Total kWh Heat-Generation/IDX#,Total kWh Heat-Generation/'
 )
 do
-    echo -e "\e[1;4;35m"
-    printf '%s\n' "$stat"
-    IDX=`echo $stat | cut -f1 -d,`
-    STAT=`echo $stat | cut -f3 -d,`
+    echo -e -n "\e[1;4;35m"
+    print "${SolarHWStat}"
+    IDX=`echo ${SolarHWStat} | cut -f1 -d','`
+    STAT=`echo ${SolarHWStat} | cut -f3 -d','`
     echo -e -n "\e[1;4;33m"
-    echo $curl -s -X PUT "http://$DomoticzHost/json.htm?type=command&param=udevice&idx=$IDX&nvalue=0&svalue=$STAT"
+    echo ${curl} -s -X PUT "http://${DomoticzHost}/json.htm?type=command&param=udevice&idx=${IDX}&nvalue=0&svalue=${STAT}"
     echo -e -n "\e[0m"
-    $curl -s -X PUT "http://$DomoticzHost/json.htm?type=command&param=udevice&idx=$IDX&nvalue=0&svalue=$STAT"
+    ${curl} -s -X PUT "http://${DomoticzHost}/json.htm?type=command&param=udevice&idx=${IDX}&nvalue=0&svalue=${STAT}"
 done
-echo ''
 
 ## Return IFS to normal
-IFS="$OLDIFS"
+IFS="${OLDIFS}"
 
 exit 0
 
